@@ -13,10 +13,14 @@ import {
   AlertCircle, 
   Save, 
   CheckSquare,
-  Sparkles
+  Sparkles,
+  FileBadge,
+  UserCheck
 } from 'lucide-react';
 import { Oitiva, HearingStatus, HearingRole, ProcedureType, HearingModality } from '../types/oitiva';
 import { formatCPF, formatPhone } from '../utils/formatters';
+import { DelegadoSelectorModal } from './DelegadoSelectorModal';
+import { DelegadoInfo, delegadoService } from '../services/delegadoService';
 
 interface OitivaModalProps {
   isOpen: boolean;
@@ -36,6 +40,7 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
   const [activeTab, setActiveTab] = useState<'depoente' | 'procedimento' | 'agendamento'>('depoente');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isDelegadoModalOpen, setIsDelegadoModalOpen] = useState(false);
 
   // Form states
   const [personName, setPersonName] = useState('');
@@ -76,7 +81,7 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
         setAddress(initialData.address || '');
         setNeighborhood(initialData.neighborhood || '');
         setCity(initialData.city || 'Maracanaú/CE');
-        setOfficerName(initialData.officerName || '');
+        setOfficerName(initialData.officerName || 'Fernando Moretto Nachtigall');
         setClerkName(initialData.clerkName || '');
         setModality(initialData.modality || 'Presencial');
         setLocationOrLink(initialData.locationOrLink || 'Sala de Oitivas 01');
@@ -97,7 +102,11 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
         setAddress('');
         setNeighborhood('');
         setCity('Maracanaú/CE');
-        setOfficerName('');
+        
+        // Padrão: primeiro delegado cadastrado no sistema
+        const delegados = delegadoService.getDelegados();
+        setOfficerName(delegados.length > 0 ? delegados[0].nome : 'Fernando Moretto Nachtigall');
+        
         setClerkName('');
         setModality('Presencial');
         setLocationOrLink('Sala de Oitivas 01');
@@ -111,6 +120,10 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
   }, [isOpen, initialData, defaultDate]);
 
   if (!isOpen) return null;
+
+  const handleSelectDelegado = (delegado: DelegadoInfo) => {
+    setOfficerName(delegado.nome);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,7 +153,7 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
         address: address.trim(),
         neighborhood: neighborhood.trim(),
         city: city.trim(),
-        officerName: officerName.trim(),
+        officerName: officerName.trim() || 'Fernando Moretto Nachtigall',
         clerkName: clerkName.trim(),
         modality,
         locationOrLink: locationOrLink.trim(),
@@ -157,146 +170,148 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto no-print">
-      <div className="bg-[#120f1e] border border-purple-900/50 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl shadow-purple-950/50 my-8">
-        
-        {/* Modal Header */}
-        <div className="flex items-center justify-between p-5 border-b border-purple-900/40 bg-[#161226]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-950 border border-purple-500/40 flex items-center justify-center text-purple-300">
-              <User className="w-5 h-5" />
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto no-print">
+        <div className="bg-[#120f1e] border border-purple-900/50 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl shadow-purple-950/70 my-8 flex flex-col max-h-[90vh]">
+          
+          {/* Header */}
+          <div className="p-5 border-b border-purple-900/40 bg-[#161226] flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-950 border border-purple-400/40 flex items-center justify-center text-purple-200 shadow-md">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white tracking-tight">
+                  {initialData ? 'Editar Agendamento de Oitiva' : 'Nova Marcação de Oitiva'}
+                </h2>
+                <p className="text-xs text-zinc-400">
+                  Cadastre ou atualize os dados da oitiva policial e intime com facilidade
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-white tracking-tight">
-                {initialData ? 'Editar Oitiva' : 'Nova Entrada de Oitiva'}
-              </h2>
-              <p className="text-xs text-purple-300/70">
-                Apenas o nome do depoente é obrigatório.
-              </p>
-            </div>
+
+            <button
+              onClick={onClose}
+              className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-purple-950/40 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-purple-950/50 rounded-xl transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+          {/* Validation Error Alert */}
+          {validationError && (
+            <div className="mx-6 mt-4 p-3 bg-red-950/60 border border-red-500/40 rounded-xl flex items-center gap-2 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{validationError}</span>
+            </div>
+          )}
 
-        {/* Tab Navigation */}
-        <div className="flex border-b border-purple-900/30 bg-[#0e0c18] px-4">
-          <button
-            type="button"
-            onClick={() => setActiveTab('depoente')}
-            className={`py-3 px-4 text-xs font-semibold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'depoente'
-                ? 'border-purple-500 text-purple-300 bg-purple-950/20'
-                : 'border-transparent text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>1. Dados do Depoente</span>
-          </button>
+          {/* Tabs Navigation */}
+          <div className="px-6 pt-4 pb-2 border-b border-purple-900/30 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('depoente')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'depoente'
+                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                  : 'bg-[#171326] text-zinc-400 hover:text-zinc-200 border border-purple-900/30'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>1. Pessoa / Depoente *</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('agendamento')}
-            className={`py-3 px-4 text-xs font-semibold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'agendamento'
-                ? 'border-purple-500 text-purple-300 bg-purple-950/20'
-                : 'border-transparent text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            <span>2. Data & Local</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('agendamento')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'agendamento'
+                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                  : 'bg-[#171326] text-zinc-400 hover:text-zinc-200 border border-purple-900/30'
+              }`}
+            >
+              <CalendarIcon className="w-3.5 h-3.5" />
+              <span>2. Data, Hora & Local</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('procedimento')}
-            className={`py-3 px-4 text-xs font-semibold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'procedimento'
-                ? 'border-purple-500 text-purple-300 bg-purple-950/20'
-                : 'border-transparent text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>3. Procedimento & Notas</span>
-          </button>
-        </div>
-
-        {/* Validation error banner */}
-        {validationError && (
-          <div className="m-4 p-3 bg-rose-950/50 border border-rose-500/50 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>{validationError}</span>
+            <button
+              type="button"
+              onClick={() => setActiveTab('procedimento')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'procedimento'
+                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                  : 'bg-[#171326] text-zinc-400 hover:text-zinc-200 border border-purple-900/30'
+              }`}
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>3. Procedimento & DPC</span>
+            </button>
           </div>
-        )}
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit}>
-          <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+          {/* Form Body */}
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
             
-            {/* TAB 1: DEPOENTE */}
+            {/* TAB 1: DEPOENTE (PESSOA) */}
             {activeTab === 'depoente' && (
               <div className="space-y-4">
                 
-                {/* Nome Completo (OBRIGATÓRIO) */}
+                {/* Nome Completo (Único Obrigatório) */}
                 <div>
                   <label className="block text-xs font-bold text-zinc-200 mb-1">
-                    Nome Completo da Pessoa a Ser Ouvida <span className="text-purple-400">*</span>
+                    Nome Completo da Pessoa a ser Ouvida <span className="text-purple-400">*</span>
                   </label>
                   <div className="relative">
-                    <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-purple-400" />
+                    <User className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-purple-400" />
                     <input
-                      id="oitiva-person-name"
                       type="text"
                       required
                       placeholder="Ex: João da Silva Santos"
                       value={personName}
                       onChange={(e) => setPersonName(e.target.value)}
-                      className="w-full bg-[#171326] border border-purple-500/40 focus:border-purple-400 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                      className="w-full bg-[#171326] border border-purple-900/50 focus:border-purple-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none ring-0 font-medium"
                     />
                   </div>
-                  <p className="text-[10px] text-purple-300/70 mt-1">
-                    Este nome será o destaque principal na grade do calendário.
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    * Este é o único campo obrigatório para salvar a marcação.
                   </p>
                 </div>
 
-                {/* Condição / Papel */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                      Condição / Papel
-                    </label>
-                    <select
-                      value={role}
-                      onChange={(e) => setRole(e.target.value as HearingRole)}
-                      className="w-full bg-[#171326] border border-purple-900/40 focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none"
-                    >
-                      <option value="Testemunha">Testemunha</option>
-                      <option value="Vítima">Vítima</option>
-                      <option value="Investigado">Investigado</option>
-                      <option value="Declarante">Declarante</option>
-                      <option value="Representante Legal">Representante Legal</option>
-                      <option value="Informante">Informante</option>
-                      <option value="Perito">Perito</option>
-                      <option value="Outro">Outro</option>
-                    </select>
+                {/* Qualificação / Papel */}
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                    Condição da Pessoa no Procedimento (Opcional)
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(['Testemunha', 'Vítima', 'Investigado', 'Declarante', 'Representante Legal', 'Informante', 'Perito', 'Outro'] as HearingRole[]).map((r) => (
+                      <button
+                        type="button"
+                        key={r}
+                        onClick={() => setRole(r)}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                          role === r
+                            ? 'bg-purple-600 text-white border-purple-400 shadow-sm shadow-purple-900/50'
+                            : 'bg-[#171326] text-zinc-400 border-purple-900/40 hover:text-zinc-200'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
                   </div>
+                </div>
 
-                  {/* CPF */}
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                      CPF (Opcional)
-                    </label>
+                {/* CPF */}
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                    CPF (Opcional)
+                  </label>
+                  <div className="relative">
+                    <FileText className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                     <input
                       type="text"
                       placeholder="000.000.000-00"
                       value={cpf}
                       onChange={(e) => setCpf(formatCPF(e.target.value))}
-                      className="w-full bg-[#171326] border border-purple-900/40 focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none font-mono"
+                      className="w-full bg-[#171326] border border-purple-900/40 focus:border-purple-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none font-mono"
                     />
                   </div>
                 </div>
@@ -554,28 +569,48 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
                   </div>
                 </div>
 
-                {/* Delegado & Escrivão */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Delegado (com Seletor Modal DPC) & Escrivão */}
+                <div className="space-y-3 pt-2 border-t border-purple-900/20">
+                  {/* Campo Delegado com Ação de Modal */}
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                      Autoridade Policial / Delegado(a)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Dr. Nome do Delegado"
-                      value={officerName}
-                      onChange={(e) => setOfficerName(e.target.value)}
-                      className="w-full bg-[#171326] border border-purple-900/40 focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                        <FileBadge className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Autoridade Policial / Delegado(a) (DPC)</span>
+                      </label>
+                      
+                      <button
+                        type="button"
+                        onClick={() => setIsDelegadoModalOpen(true)}
+                        className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                        title="Abrir catálogo de Delegados da Unidade"
+                      >
+                        <UserCheck className="w-3 h-3" />
+                        <span>Selecionar no Catálogo de Delegados</span>
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Ex: Fernando Moretto Nachtigall"
+                        value={officerName}
+                        onChange={(e) => setOfficerName(e.target.value)}
+                        className="w-full bg-[#171326] border border-purple-900/40 focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none"
+                      />
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-1">
+                      * O Delegado selecionado aqui é quem constará como signatário oficial na área de assinatura do Mandado de Intimação (PDF).
+                    </p>
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                      Escrivão(ã) / Responsável
+                      Escrivão(ã) / Responsável pelo Cartório
                     </label>
                     <input
                       type="text"
-                      placeholder="Ex: Escrivão(ã) Fulano"
+                      placeholder="Ex: Escrivão(ã) Fulano / Cartório 01"
                       value={clerkName}
                       onChange={(e) => setClerkName(e.target.value)}
                       className="w-full bg-[#171326] border border-purple-900/40 focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none"
@@ -589,7 +624,7 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
                     Observações / Anotações Complementares
                   </label>
                   <textarea
-                    rows={4}
+                    rows={3}
                     placeholder="Instruções para a oitiva, necessidade de advogado, documentos a apresentar, etc..."
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
@@ -600,45 +635,66 @@ export const OitivaModal: React.FC<OitivaModalProps> = ({
               </div>
             )}
 
-          </div>
-
-          {/* Footer Actions */}
-          <div className="p-5 border-t border-purple-900/30 bg-[#161226] flex items-center justify-between">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-[#1d182e] hover:bg-[#27203d] text-zinc-300 hover:text-white text-xs font-semibold transition-colors"
-            >
-              Cancelar
-            </button>
-
-            <div className="flex items-center gap-2">
-              {activeTab !== 'procedimento' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (activeTab === 'depoente') setActiveTab('agendamento');
-                    else if (activeTab === 'agendamento') setActiveTab('procedimento');
-                  }}
-                  className="px-4 py-2.5 bg-purple-950 hover:bg-purple-900 text-purple-200 border border-purple-500/40 rounded-xl text-xs font-semibold transition-colors"
-                >
-                  Avançar →
-                </button>
-              ) : null}
-
+            {/* Form Actions */}
+            <div className="pt-4 border-t border-purple-900/30 flex items-center justify-between">
               <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-900/50 transition-all disabled:opacity-50 cursor-pointer"
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-semibold transition-colors"
               >
-                <Save className="w-4 h-4" />
-                <span>{isSubmitting ? 'Salvando...' : initialData ? 'Salvar Alterações' : 'Cadastrar Oitiva'}</span>
+                Cancelar
               </button>
-            </div>
-          </div>
-        </form>
 
+              <div className="flex gap-2">
+                {activeTab !== 'depoente' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeTab === 'agendamento') setActiveTab('depoente');
+                      if (activeTab === 'procedimento') setActiveTab('agendamento');
+                    }}
+                    className="px-3.5 py-2 bg-[#171326] hover:bg-purple-950/40 text-zinc-300 border border-purple-900/40 rounded-xl text-xs font-semibold transition-colors"
+                  >
+                    Voltar
+                  </button>
+                )}
+
+                {activeTab !== 'procedimento' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeTab === 'depoente') setActiveTab('agendamento');
+                      if (activeTab === 'agendamento') setActiveTab('procedimento');
+                    }}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-colors"
+                  >
+                    Avançar
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-900/40 transition-all disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{isSubmitting ? 'Salvando...' : 'Salvar Oitiva'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+          </form>
+
+        </div>
       </div>
-    </div>
+
+      {/* Modal Seletor de Delegados */}
+      <DelegadoSelectorModal
+        isOpen={isDelegadoModalOpen}
+        onClose={() => setIsDelegadoModalOpen(false)}
+        onSelectDelegado={handleSelectDelegado}
+        currentSelectedNome={officerName}
+      />
+    </>
   );
 };
