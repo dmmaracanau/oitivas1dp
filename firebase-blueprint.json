@@ -136,6 +136,11 @@
           "type": "string",
           "description": "Identificador do usuário ou cartório que criou",
           "maxLength": 150
+        },
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID do usuário proprietário da oitiva",
+          "maxLength": 128
         }
       },
       "required": ["personName", "status", "createdAt", "updatedAt"]

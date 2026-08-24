@@ -65,9 +65,16 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
-  // Oitivas real-time listener
+  // Oitivas real-time listener restrito ao UID do usuário autenticado
   useEffect(() => {
+    if (!user?.uid) {
+      setOitivas([]);
+      setSyncStatus('connected');
+      return;
+    }
+
     const unsubOitivas = oitivaService.subscribe(
+      user.uid,
       (list) => {
         setOitivas(list);
       },
@@ -79,7 +86,7 @@ export default function App() {
       }
     );
     return () => unsubOitivas();
-  }, []);
+  }, [user?.uid]);
 
   // Handlers
   const handleAddOitivaForDate = (dateStr: string) => {
@@ -112,17 +119,22 @@ export default function App() {
 
   const handleSaveOitiva = async (data: Omit<Oitiva, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
+      const currentUid = user?.uid;
       if (editingOitiva) {
-        await oitivaService.update(editingOitiva.id, data);
+        await oitivaService.update(editingOitiva.id, {
+          ...data,
+          uid: editingOitiva.uid || currentUid
+        }, currentUid);
         showToast(`Oitiva de "${data.personName}" atualizada com sucesso!`);
         if (selectedOitiva && selectedOitiva.id === editingOitiva.id) {
-          setSelectedOitiva({ ...editingOitiva, ...data, updatedAt: Date.now() });
+          setSelectedOitiva({ ...editingOitiva, ...data, uid: editingOitiva.uid || currentUid, updatedAt: Date.now() });
         }
       } else {
         await oitivaService.create({
           ...data,
-          createdBy: user?.email || 'plantao'
-        });
+          uid: currentUid,
+          createdBy: user?.email || user?.displayName || 'plantao'
+        }, currentUid);
         showToast(`Oitiva de "${data.personName}" agendada com sucesso!`);
       }
     } catch (err: any) {
@@ -132,7 +144,7 @@ export default function App() {
 
   const handleDeleteOitiva = async (id: string) => {
     try {
-      await oitivaService.delete(id);
+      await oitivaService.delete(id, user?.uid);
       showToast('Oitiva removida do sistema.', 'info');
       setIsDetailModalOpen(false);
     } catch (err: any) {
@@ -142,7 +154,7 @@ export default function App() {
 
   const handleStatusChange = async (id: string, newStatus: HearingStatus) => {
     try {
-      await oitivaService.update(id, { status: newStatus });
+      await oitivaService.update(id, { status: newStatus }, user?.uid);
       showToast(`Status atualizado para "${newStatus}".`);
       if (selectedOitiva && selectedOitiva.id === id) {
         setSelectedOitiva(prev => prev ? { ...prev, status: newStatus } : null);
@@ -154,7 +166,7 @@ export default function App() {
 
   const handleUpdateOitivaDirect = async (id: string, updates: Partial<Oitiva>) => {
     try {
-      await oitivaService.update(id, updates);
+      await oitivaService.update(id, updates, user?.uid);
       if (selectedOitiva && selectedOitiva.id === id) {
         setSelectedOitiva(prev => prev ? { ...prev, ...updates } : null);
       }

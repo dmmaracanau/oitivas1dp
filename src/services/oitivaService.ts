@@ -2,27 +2,26 @@ import {
   collection, 
   onSnapshot, 
   addDoc, 
-  setDoc,
+  setDoc, 
   deleteDoc, 
   doc, 
   query, 
-  orderBy,
-  getDocs,
-  writeBatch
+  where,
+  orderBy, 
+  getDocs 
 } from 'firebase/firestore';
 import { 
   ref as rtdbRef, 
   set as rtdbSet, 
   update as rtdbUpdate, 
   remove as rtdbRemove, 
-  onValue as rtdbOnValue,
   get as rtdbGet
 } from 'firebase/database';
-import { db, rtdb, handleFirestoreError, OperationType } from '../firebase';
+import { db, rtdb, auth, handleFirestoreError, OperationType } from '../firebase';
 import { Oitiva } from '../types/oitiva';
 
 const COLLECTION_NAME = 'oitivas';
-const LOCAL_STORAGE_KEY = 'oitivas_agenda_data_v2';
+const LOCAL_STORAGE_BASE_KEY = 'oitivas_agenda_data_v3';
 
 // Remove propriedades undefined para evitar rejeição no Firebase
 function sanitizePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
@@ -35,29 +34,33 @@ function sanitizePayload<T extends Record<string, any>>(obj: T): Record<string, 
   return result;
 }
 
-// Helpers de cache local
-function getLocalCache(): Oitiva[] {
+// Helpers de cache local isolados por usuário (uid)
+function getCacheKey(uid?: string): string {
+  return `${LOCAL_STORAGE_BASE_KEY}_${uid || 'anon'}`;
+}
+
+function getLocalCache(uid?: string): Oitiva[] {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const raw = localStorage.getItem(getCacheKey(uid));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function setLocalCache(data: Oitiva[]) {
+function setLocalCache(data: Oitiva[], uid?: string) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(getCacheKey(uid), JSON.stringify(data));
   } catch (err) {
     console.warn("Falha ao atualizar cache local:", err);
   }
 }
 
-// Sincroniza em background com o Firebase Realtime Database
-async function syncToRealtimeDatabase(oitivas: Oitiva[]) {
+// Sincroniza em background com o Firebase Realtime Database isolado por uid
+async function syncToRealtimeDatabase(oitivas: Oitiva[], uid?: string) {
   try {
-    if (!rtdb) return;
-    const dbRef = rtdbRef(rtdb, 'oitivas');
+    if (!rtdb || !uid) return;
+    const dbRef = rtdbRef(rtdb, `user_oitivas/${uid}`);
     if (oitivas.length === 0) {
       await rtdbSet(dbRef, null);
       return;
@@ -73,22 +76,55 @@ async function syncToRealtimeDatabase(oitivas: Oitiva[]) {
 }
 
 export const oitivaService = {
-  // Assinatura em tempo real - escuta mudanças no Firestore e Realtime Database
+  /**
+   * Assinatura em tempo real com filtro estrito por 'uid'
+   * Garante isolamento total: apenas oitivas do usuário autenticado são recuperadas
+   */
   subscribe(
-    onData: (oitivas: Oitiva[]) => void, 
-    onError?: (err: Error) => void,
-    onStatusChange?: (status: 'connected' | 'syncing' | 'offline') => void
+    uidOrOnData: string | undefined | ((oitivas: Oitiva[]) => void), 
+    onDataOrError?: ((oitivas: Oitiva[]) => void) | ((err: Error) => void),
+    onErrorOrStatus?: ((err: Error) => void) | ((status: 'connected' | 'syncing' | 'offline') => void),
+    onStatusChangeCallback?: (status: 'connected' | 'syncing' | 'offline') => void
   ) {
+    let targetUid: string | undefined;
+    let onData: (oitivas: Oitiva[]) => void;
+    let onError: ((err: Error) => void) | undefined;
+    let onStatusChange: ((status: 'connected' | 'syncing' | 'offline') => void) | undefined;
+
+    if (typeof uidOrOnData === 'function') {
+      targetUid = auth.currentUser?.uid;
+      onData = uidOrOnData;
+      onError = typeof onDataOrError === 'function' ? onDataOrError as (err: Error) => void : undefined;
+      onStatusChange = typeof onErrorOrStatus === 'function' ? onErrorOrStatus as (status: 'connected' | 'syncing' | 'offline') => void : undefined;
+    } else {
+      targetUid = uidOrOnData || auth.currentUser?.uid;
+      onData = onDataOrError as (oitivas: Oitiva[]) => void;
+      onError = onErrorOrStatus as ((err: Error) => void) | undefined;
+      onStatusChange = onStatusChangeCallback;
+    }
+
     if (onStatusChange) onStatusChange('syncing');
 
-    // Emite o cache local imediatamente para renderização rápida
-    const cached = getLocalCache();
-    if (cached.length > 0) {
+    // Se não houver usuário autenticado ainda, emite lista vazia e aguarda
+    if (!targetUid) {
+      if (onData) onData([]);
+      if (onStatusChange) onStatusChange('connected');
+      return () => {};
+    }
+
+    // Emite o cache local exclusivo deste usuário imediatamente para renderização rápida
+    const cached = getLocalCache(targetUid);
+    if (cached.length > 0 && onData) {
       onData(cached);
     }
 
     try {
-      const q = query(collection(db, COLLECTION_NAME), orderBy('date', 'asc'));
+      // Query com constraint estrito por UID do usuário autenticado
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('uid', '==', targetUid),
+        orderBy('date', 'asc')
+      );
 
       const unsubscribe = onSnapshot(
         q,
@@ -96,9 +132,9 @@ export const oitivaService = {
           if (onStatusChange) onStatusChange('connected');
 
           if (snapshot.empty) {
-            setLocalCache([]);
-            onData([]);
-            syncToRealtimeDatabase([]);
+            setLocalCache([], targetUid);
+            if (onData) onData([]);
+            syncToRealtimeDatabase([], targetUid);
             return;
           }
 
@@ -107,6 +143,7 @@ export const oitivaService = {
             const d = docSnap.data();
             items.push({
               id: docSnap.id,
+              uid: d.uid || targetUid,
               personName: d.personName || 'Sem nome',
               date: d.date || '',
               time: d.time || '',
@@ -144,39 +181,38 @@ export const oitivaService = {
             return (a.time || '00:00').localeCompare(b.time || '00:00');
           });
 
-          setLocalCache(items);
-          onData(items);
+          setLocalCache(items, targetUid);
+          if (onData) onData(items);
 
-          // Sincroniza em tempo real com o Realtime Database no nó /oitivas
-          syncToRealtimeDatabase(items);
+          // Sincroniza em tempo real com o Realtime Database no nó do usuário
+          syncToRealtimeDatabase(items, targetUid);
         },
         (firestoreErr) => {
           handleFirestoreError(firestoreErr, OperationType.LIST, COLLECTION_NAME);
           if (onStatusChange) onStatusChange('offline');
           if (onError) onError(firestoreErr);
 
-          // Tenta ler do Realtime Database como fallback se disponível
+          // Tenta ler do Realtime Database como fallback
           try {
-            if (rtdb) {
-              const rRef = rtdbRef(rtdb, 'oitivas');
+            if (rtdb && targetUid) {
+              const rRef = rtdbRef(rtdb, `user_oitivas/${targetUid}`);
               rtdbGet(rRef).then((snap) => {
                 if (snap.exists()) {
                   const val = snap.val();
                   const rtdbItems: Oitiva[] = Object.values(val);
-                  setLocalCache(rtdbItems);
-                  onData(rtdbItems);
+                  setLocalCache(rtdbItems, targetUid);
+                  if (onData) onData(rtdbItems);
                   if (onStatusChange) onStatusChange('connected');
-                  return;
                 }
               }).catch(() => {});
             }
           } catch {
-            // Segue para fallback de cache local
+            // Ignora
           }
 
-          // Fallback para cache local existente sem re-gerar mocks
-          const localItems = getLocalCache();
-          onData(localItems);
+          // Fallback para cache local deste usuário
+          const localItems = getLocalCache(targetUid);
+          if (onData) onData(localItems);
         }
       );
 
@@ -189,10 +225,15 @@ export const oitivaService = {
     }
   },
 
-  // Criar nova oitiva no Firestore e Realtime Database em tempo real
-  async create(data: Omit<Oitiva, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+  /**
+   * Criação de oitiva incluindo obrigatoriamente o campo 'uid' do Firebase Auth
+   */
+  async create(data: Omit<Oitiva, 'id' | 'createdAt' | 'updatedAt'>, currentUid?: string): Promise<string> {
+    const effectiveUid = data.uid || currentUid || auth.currentUser?.uid || '';
+    
     const payload: Omit<Oitiva, 'id'> = {
       ...data,
+      uid: effectiveUid,
       personName: data.personName.trim(),
       date: data.date || new Date().toISOString().split('T')[0],
       time: data.time || '10:00',
@@ -208,10 +249,10 @@ export const oitivaService = {
       const docRef = await addDoc(collection(db, COLLECTION_NAME), sanitized);
       const newId = docRef.id;
 
-      // Grava no Realtime Database em paralelo
+      // Grava no Realtime Database isolado por usuário
       try {
-        if (rtdb) {
-          const itemRef = rtdbRef(rtdb, `oitivas/${newId}`);
+        if (rtdb && effectiveUid) {
+          const itemRef = rtdbRef(rtdb, `user_oitivas/${effectiveUid}/${newId}`);
           await rtdbSet(itemRef, { ...sanitized, id: newId });
         }
       } catch (rtdbErr) {
@@ -223,14 +264,13 @@ export const oitivaService = {
       handleFirestoreError(err, OperationType.CREATE, COLLECTION_NAME);
       
       const localId = `local_${Date.now()}`;
-      const current = getLocalCache();
+      const current = getLocalCache(effectiveUid);
       const newItems = [{ ...payload, id: localId }, ...current];
-      setLocalCache(newItems);
+      setLocalCache(newItems, effectiveUid);
 
-      // Tenta gravar no RTDB
       try {
-        if (rtdb) {
-          const itemRef = rtdbRef(rtdb, `oitivas/${localId}`);
+        if (rtdb && effectiveUid) {
+          const itemRef = rtdbRef(rtdb, `user_oitivas/${effectiveUid}/${localId}`);
           await rtdbSet(itemRef, { ...sanitized, id: localId });
         }
       } catch {}
@@ -239,22 +279,26 @@ export const oitivaService = {
     }
   },
 
-  // Atualizar oitiva existente no Firestore e Realtime Database
-  async update(id: string, data: Partial<Omit<Oitiva, 'id'>>): Promise<void> {
+  /**
+   * Atualiza oitiva existente mantendo o uid original
+   */
+  async update(id: string, data: Partial<Omit<Oitiva, 'id'>>, currentUid?: string): Promise<void> {
+    const effectiveUid = data.uid || currentUid || auth.currentUser?.uid;
     const updatePayload = sanitizePayload({
       ...data,
+      ...(effectiveUid ? { uid: effectiveUid } : {}),
       updatedAt: Date.now()
     });
 
-    // Atualização otimista no cache local
-    const current = getLocalCache();
+    // Atualização otimista no cache local do usuário
+    const current = getLocalCache(effectiveUid);
     const updated = current.map(item => item.id === id ? { ...item, ...updatePayload } : item);
-    setLocalCache(updated);
+    setLocalCache(updated, effectiveUid);
 
-    // Atualiza no Realtime Database
+    // Atualiza no Realtime Database do usuário
     try {
-      if (rtdb) {
-        const itemRef = rtdbRef(rtdb, `oitivas/${id}`);
+      if (rtdb && effectiveUid) {
+        const itemRef = rtdbRef(rtdb, `user_oitivas/${effectiveUid}/${id}`);
         await rtdbUpdate(itemRef, updatePayload);
       }
     } catch (rtdbErr) {
@@ -270,17 +314,21 @@ export const oitivaService = {
     }
   },
 
-  // Excluir oitiva do Firestore e Realtime Database em tempo real
-  async delete(id: string): Promise<void> {
+  /**
+   * Exclui oitiva do Firestore e Realtime Database
+   */
+  async delete(id: string, currentUid?: string): Promise<void> {
+    const effectiveUid = currentUid || auth.currentUser?.uid;
+    
     // Atualização otimista imediata no cache local
-    const current = getLocalCache();
+    const current = getLocalCache(effectiveUid);
     const updated = current.filter(item => item.id !== id);
-    setLocalCache(updated);
+    setLocalCache(updated, effectiveUid);
 
     // Exclui do Realtime Database
     try {
-      if (rtdb) {
-        const itemRef = rtdbRef(rtdb, `oitivas/${id}`);
+      if (rtdb && effectiveUid) {
+        const itemRef = rtdbRef(rtdb, `user_oitivas/${effectiveUid}/${id}`);
         await rtdbRemove(itemRef);
       }
     } catch (rtdbErr) {
@@ -296,16 +344,26 @@ export const oitivaService = {
     }
   },
 
-  // Carregar todos os dados uma vez (forçar sincronização)
-  async getAll(): Promise<Oitiva[]> {
+  /**
+   * Carrega os dados filtrados por uid
+   */
+  async getAll(currentUid?: string): Promise<Oitiva[]> {
+    const targetUid = currentUid || auth.currentUser?.uid;
+    if (!targetUid) return [];
+
     try {
-      const q = query(collection(db, COLLECTION_NAME), orderBy('date', 'asc'));
+      const q = query(
+        collection(db, COLLECTION_NAME), 
+        where('uid', '==', targetUid), 
+        orderBy('date', 'asc')
+      );
       const snapshot = await getDocs(q);
       const items: Oitiva[] = [];
       snapshot.forEach(docSnap => {
         const d = docSnap.data();
         items.push({
           id: docSnap.id,
+          uid: d.uid || targetUid,
           personName: d.personName || '',
           date: d.date || '',
           time: d.time || '',
@@ -335,13 +393,12 @@ export const oitivaService = {
           createdBy: d.createdBy || ''
         });
       });
-      setLocalCache(items);
-      syncToRealtimeDatabase(items);
+      setLocalCache(items, targetUid);
+      syncToRealtimeDatabase(items, targetUid);
       return items;
     } catch (err: any) {
       handleFirestoreError(err, OperationType.GET, COLLECTION_NAME);
-      return getLocalCache();
+      return getLocalCache(targetUid);
     }
   }
 };
-

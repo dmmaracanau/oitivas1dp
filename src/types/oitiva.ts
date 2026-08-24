@@ -58,6 +58,7 @@ export interface Oitiva {
   createdAt: number;
   updatedAt: number;
   createdBy?: string;
+  uid?: string; // ID do usuário autenticado no Firebase Auth
 }
 
 export interface UserProfile {
